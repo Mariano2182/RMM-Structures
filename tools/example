@@ -1,0 +1,13 @@
+import fs from 'node:fs';
+import {newProject} from '../src/model/project.js';
+import {analyzeProject} from '../src/analysis/run.js';
+import {reportHTML,bomCSV} from '../src/io/export.js';
+import {exportIFC} from '../src/io/ifc.js';
+const project=newProject();project.id='rmm-example-001';
+const r=analyzeProject(project);
+fs.mkdirSync('examples',{recursive:true});
+fs.writeFileSync('examples/nave-ejemplo.json',JSON.stringify(project,null,2));
+fs.writeFileSync('examples/memoria-ejemplo.html',reportHTML(r));
+fs.writeFileSync('examples/materiales-ejemplo.csv',bomCSV(r.model));
+fs.writeFileSync('examples/modelo-ejemplo.ifc',exportIFC(r.model,project.name));
+console.log(JSON.stringify({cases:r.cases.length,members:r.members.length,parts:r.model.parts.length,failures:r.failures,status:r.status}));
