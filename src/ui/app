@@ -1,0 +1,51 @@
+import {newProject,buildModel} from '../model/project.js';
+import {catalog} from '../model/sections.js';
+import {SpatialView,drawDiagram} from './viewer.js';
+import {download,bomCSV,reportHTML,escapeHTML as e} from '../io/export.js';
+import {exportIFC} from '../io/ifc.js';
+import {saveVersion,listVersions,loadVersion,importProject} from '../io/storage.js';
+const $=s=>document.querySelector(s),fmt=(x,n=2)=>Number.isFinite(x)?x.toLocaleString('es-AR',{maximumFractionDigits:n}):'—';
+let project=newProject(),model,result=null,worker=null,dirty=false;
+const table=(heads,rows)=>`<table><thead><tr>${heads.map(v=>`<th>${e(v)}</th>`).join('')}</tr></thead><tbody>${rows.map(row=>`<tr>${row.map(v=>`<td>${e(v)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+const view=new SpatialView($('#spatial'),p=>$('#selected-part').textContent=`${p.id} · ${p.profile} · ${fmt(p.length,3)} m · ${fmt(p.massKg)} kg · ${p.type==='column'||p.type==='rafter'?'Barra principal':'Secundario: sólo cómputo'}`);
+function status(msg,error=false){$('#status').textContent=msg;$('#status').classList.toggle('error',error);}
+function invalidate(){dirty=true;result=null;if(worker){worker.terminate();worker=null;}$('#run').disabled=false;$('#progress').hidden=true;$('#report').disabled=true;$('#results-json').disabled=true;$('#result-state').textContent='Cambios sin calcular';$('#k-fail').textContent='—';$('#checks').textContent='Datos modificados. Recalculá para ver resultados actuales.';$('#service').textContent='';$('#trace').textContent='';$('#reactions').textContent='';$('#case').innerHTML='';drawDiagram($('#diagram-canvas'),null,'M');}
+function readForm(){
+ const p=structuredClone(project);for(const el of document.querySelectorAll('[data-path]')){const path=el.dataset.path.split('.');let o=p;for(const k of path.slice(0,-1))o=o[k];o[path.at(-1)]=el.type==='number'?el.valueAsNumber:el.value;}
+ try{p.combinations=JSON.parse($('#combinations').value);p.sectionOverrides=JSON.parse($('#overrides').value);}catch{throw Error('Revisá el JSON de combinaciones o propiedades.');}return p;
+}
+function fillForm(){for(const el of document.querySelectorAll('[data-path]')){let o=project;for(const k of el.dataset.path.split('.'))o=o[k];el.value=o;}$('#combinations').value=JSON.stringify(project.combinations,null,2);$('#overrides').value=JSON.stringify(project.sectionOverrides,null,2);}
+function preview(){model=buildModel(project);view.setModel(model);$('#project-title').textContent=project.name;$('#k-parts').textContent=fmt(model.parts.length,0);$('#k-mass').textContent=fmt(model.massKg,0)+' kg';$('#k-area').textContent=fmt(model.planArea,0)+' m²';$('#bom').innerHTML=table(['Pieza','Tipo','Perfil','Longitud m','Masa kg'],model.parts.map(p=>[p.id,p.type,p.profile,fmt(p.length,3),fmt(p.massKg)]));}
+function currentModel(){project=readForm();preview();return model;}
+function history(){try{$('#versions').replaceChildren();for(const v of listVersions()){const b=document.createElement('button');b.textContent=`${v.project.name} · rev ${v.project.revision} · ${new Date(v.savedAt).toLocaleString('es-AR')}`;b.onclick=()=>{try{project=loadVersion(v.id);invalidate();fillForm();preview();status('Versión específica recuperada. Todos los parámetros restaurados.');}catch(err){status(err.message,true);}};$('#versions').append(b);}}catch(err){status(err.message,true);}}
+function renderResults(){
+ $('#result-state').textContent='Verificación global incompleta';$('#k-fail').textContent=fmt(result.failures,0);$('#report').disabled=false;$('#results-json').disabled=false;
+ const rows=result.members.flatMap(m=>m.checks.map(c=>[m.id,c.id,fmt(c.demand),fmt(c.capacity),c.unit,fmt(c.ratio,3),c.caseId,c.status]));
+ $('#checks').innerHTML=table(['Pieza','Chequeo','Demanda','Capacidad','Unidad','Índice','Gobierna','Estado parcial'],rows);
+ for(const td of $('#checks').querySelectorAll('td'))if(td.textContent==='NO_SATISFACE')td.className='fail';else if(td.textContent==='NO_VERIFICADO')td.className='pending';else if(td.textContent==='SATISFACE_CHEQUEO')td.className='pass';
+ $('#service').innerHTML=table(['Caso','Índice flecha','Índice deriva','Máx |uy| mm'],result.service.map(s=>[s.caseId,fmt(s.roofRatio,3),fmt(s.driftRatio,3),fmt(s.maxUy*1000)]));
+ $('#pending').innerHTML=result.pending.map(p=>`<li>${e(p)}</li>`).join('');$('#trace').textContent=JSON.stringify(result.members.map(m=>({pieza:m.id,...m.capacities})),null,2);
+ $('#case').replaceChildren();for(const c of result.cases){const o=document.createElement('option');o.value=c.id;o.textContent=c.id+' · '+c.combination.name;$('#case').append(o);}diagram();
+}
+function diagram(){const c=result?.cases.find(c=>c.id===$('#case').value);if(!c)return;drawDiagram($('#diagram-canvas'),c,$('#diagram').value);$('#diagram-info').textContent=`${c.id} · ancho tributario ${fmt(c.width)} m · residuo libre ${c.solution.freeResidual.toExponential(2)} · N positivo tracción; M y V en ejes locales. Esfuerzos de primer orden.`;$('#reactions').innerHTML=table(['Apoyo','Rx kN','Ry kN','M kN·m'],c.solution.reactions.map(r=>[r.id,fmt(r.Rx),fmt(r.Ry),fmt(r.M)]));}
+for(const s of document.querySelectorAll('.profiles'))for(const key of Object.keys(catalog)){const o=document.createElement('option');o.value=key;o.textContent=key;s.append(o);}
+$('#project-form').addEventListener('input',()=>{invalidate();status('Parámetros modificados. Calculá para actualizar geometría y resultados.');});
+$('#project-form').addEventListener('submit',event=>{event.preventDefault();try{
+ project=readForm();preview();invalidate();$('#run').disabled=true;$('#progress').hidden=false;$('#progress').value=0;status('Resolviendo pórticos y combinaciones…');
+ worker=new Worker(new URL('../analysis/worker.js',import.meta.url),{type:'module'});
+ worker.onmessage=({data})=>{if(data.type==='progress')$('#progress').value=data.value;else if(data.type==='error'){status(data.message,true);worker.terminate();worker=null;$('#run').disabled=false;$('#progress').hidden=true;}else {result=data.result;dirty=false;renderResults();status('Cálculo terminado. Revisá chequeos excedidos y alcance pendiente.');worker.terminate();worker=null;$('#run').disabled=false;$('#progress').hidden=true;}};
+ worker.onerror=err=>{status('Error en el motor: '+err.message,true);worker?.terminate();worker=null;$('#run').disabled=false;$('#progress').hidden=true;};worker.postMessage(project);
+ }catch(err){status(err.message,true);}});
+$('#example').onclick=()=>{project=newProject();invalidate();fillForm();preview();status('Ejemplo ilustrativo cargado.');};
+$('#save').onclick=()=>{try{project=readForm();buildModel(project);project.revision+=1;saveVersion(project);invalidate();history();status('Versión guardada. Recalculá para emitir memoria de esta revisión.');}catch(err){status(err.message,true);}};
+$('#export-project').onclick=()=>{try{project=readForm();buildModel(project);download('rmm-proyecto.json',JSON.stringify(project,null,2));status('Proyecto JSON descargado.');}catch(err){status(err.message,true);}};
+$('#import').onchange=async event=>{try{const file=event.target.files[0];if(!file)return;const p=importProject(await file.text());project=p;invalidate();fillForm();preview();status('Proyecto importado. Calculá para obtener resultados.');}catch(err){status(err.message,true);}event.target.value='';};
+$('#csv').onclick=()=>{try{download('rmm-materiales.csv',bomCSV(currentModel()),'text/csv;charset=utf-8');}catch(err){status(err.message,true);}};
+$('#ifc').onclick=()=>{try{download('rmm-modelo.ifc',exportIFC(currentModel(),project.name),'application/x-step');}catch(err){status(err.message,true);}};
+$('#report').onclick=()=>{if(result&&!dirty)download('rmm-memoria.html',reportHTML(result),'text/html;charset=utf-8');};
+$('#results-json').onclick=()=>{if(result&&!dirty)download('rmm-resultados.json',JSON.stringify(result,null,2));};
+$('#rotate').onclick=()=>{view.angle+=Math.PI/6;view.draw();};$('#case').onchange=diagram;$('#diagram').onchange=diagram;
+for(const b of document.querySelectorAll('[data-tab]'))b.onclick=()=>{for(const x of document.querySelectorAll('[data-tab]'))x.classList.toggle('active',x===b);for(const x of document.querySelectorAll('.panel'))x.hidden=x.id!==`panel-${b.dataset.tab}`;view.draw();diagram();};
+new ResizeObserver(()=>diagram()).observe($('#diagram-canvas'));
+$('#pending').innerHTML=['Estabilidad global y segundo orden.','Acciones automáticas y combinaciones completas.','CIRSOC 303, conexiones, anclajes, fundaciones y suelo.','Revisión y firma profesional.'].map(x=>`<li>${e(x)}</li>`).join('');
+fillForm();preview();history();
