@@ -1,0 +1,2 @@
+import {analyzeProject} from './run.js';
+self.onmessage=({data})=>{try {const result=analyzeProject(data,p=>self.postMessage({type:'progress',value:p}));self.postMessage({type:'result',result});}catch(e){self.postMessage({type:'error',message:e.message});}};
