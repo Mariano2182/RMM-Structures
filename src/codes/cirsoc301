@@ -1,0 +1,56 @@
+// CIRSOC 301-2018: subset for doubly symmetric rolled I sections.
+// All dimensions m; force kN; stress MPa converted to kN/m².
+// Results are individual limit-state checks using FIRST-ORDER demands.
+// They NEVER constitute approval of a structure (Chapter C not implemented).
+import {range} from '../core/math.js';
+export const CODE_URL='https://www.inti.gob.ar/assets/uploads/files/cirsoc/08-reglamentos-3ra-generacion/area300/08_Area300-1A-301-Reglamento-CIRSOC-301-18-APROBADO.pdf';
+export function bucklingStress(Fy,E,lambda){const Fe=Math.PI**2*E/lambda**2;return {Fe,Fcr:Fy/Fe<=2.25?Math.pow(0.658,Fy/Fe)*Fy:0.877*Fe};}
+export function capacities(s,m,a,length){
+ const E=m.E*1000,Fy=m.Fy*1000,Fu=m.Fu*1000,G=E/(2*(1+m.nu));
+ const lambdaF=s.b/(2*s.tf),lambdaW=s.h/s.tw,root=Math.sqrt(E/Fy);
+ const nonSlender=lambdaF<=0.56*root&&lambdaW<=1.49*root,compact=lambdaF<=0.38*root&&lambdaW<=3.76*root;
+ const limits={lambdaF,lambdaW,compressionFlange:0.56*root,compressionWeb:1.49*root,flexionFlange:0.38*root,flexionWeb:3.76*root};
+ const lx=a.Kx*length/s.rx,ly=a.Ky*a.Ly/s.ry;
+ const bx=bucklingStress(Fy,E,lx),by=bucklingStress(Fy,E,ly);
+ const Fez=(Math.PI**2*E*s.Cw/(a.Kz*a.Lz)**2+G*s.J)/(s.Ix+s.Iy);
+ const fz=Fy/Fez<=2.25?0.658**(Fy/Fez)*Fy:0.877*Fez;
+ const compression=nonSlender?0.85*s.A*Math.min(bx.Fcr,by.Fcr,fz):null;
+ const tensionYield=0.9*Fy*s.A,tensionRupture=0.75*Fu*s.A*a.effectiveAreaRatio;
+ const Mp=Math.min(Fy*s.Zx,1.5*Fy*s.Sx),FL=Fy-69000; // residual stress 69 MPa for rolled profiles
+ const X1=Math.PI/s.Sx*Math.sqrt(E*G*s.J*s.A/2),X2=4*s.Cw/s.Iy*(s.Sx/(G*s.J))**2;
+ const top=a.loadPosition==='top';
+ const Lp=(top?1.59:1.76)*s.ry*root;
+ const Lr=top?1.28*s.ry*X1/FL:s.ry*X1/FL*Math.sqrt(1+Math.sqrt(1+X2*FL**2));
+ const Mr=FL*s.Sx;
+ let Mn,branch;
+ if(a.Lb<=Lp){Mn=Mp;branch='F.2.1 / F.2.2(a)';}
+ else if(a.Lb<=Lr){Mn=Mp-(Mp-Mr)*(a.Lb-Lp)/(Lr-Lp);branch='F.2.2(b), Cb=1';}
+ else {Mn=top?1.28*s.Sx*X1/(a.Lb/s.ry):Math.PI/(a.Lb)*Math.sqrt(E*s.Iy*G*s.J+(Math.PI*E/a.Lb)**2*s.Iy*s.Cw);branch=top?'F.2.4b, Cb=1':'F.2.4a, Cb=1';}
+ const bending=compact?0.9*Math.min(Mp,Mn):null;
+ const kv=5,t1=1.10*Math.sqrt(kv*E/Fy),t2=1.37*Math.sqrt(kv*E/Fy);
+ const Cv=lambdaW<=t1?1:lambdaW<=t2?t1/lambdaW:1.51*kv*E/(lambdaW**2*Fy);
+ const phiV=0.9;
+ const shear=lambdaW<=260?phiV*0.6*Fy*s.d*s.tw*Cv:null;
+ return {compression,tensionYield,tensionRupture,tension:Math.min(tensionYield,tensionRupture),bending,shear,
+  trace:{limits,nonSlender,compact,lambdaX:lx,lambdaY:ly,phiC:0.85,phiB:0.9,phiTYield:0.9,phiTRupture:0.75,Fex:bx.Fe,Fey:by.Fe,Fez,FcrX:bx.Fcr,FcrY:by.Fcr,FcrZ:fz,Mp,Mr,Lp,Lr,Lb:a.Lb,Cb:1,branch,Cv,phiV,E,Fy,Fu,A:s.A,Ae:s.A*a.effectiveAreaRatio}};
+}
+function check(id,ref,demand,capacity,unit,detail=''){
+ const ratio=capacity===null?null:demand/capacity;
+ return {id,reference:`CIRSOC 301-2018 ${ref}`,demand,capacity,unit,ratio,status:ratio===null?'NO_VERIFICADO':ratio<=1?'SATISFACE_CHEQUEO':'NO_SATISFACE',detail};
+}
+export function checkMember(s,m,a,length,samples){
+ range(length,1e-6,200,'Longitud');const cap=capacities(s,m,a,length);
+ const Nc=Math.max(0,...samples.map(x=>-x.N)),Nt=Math.max(0,...samples.map(x=>x.N)),M=Math.max(...samples.map(x=>Math.abs(x.M))),V=Math.max(...samples.map(x=>Math.abs(x.V)));
+ const checks=[check('Tracción: fluencia','D.2',Nt,cap.tensionYield,'kN'),check('Tracción: rotura','D.2',Nt,cap.tensionRupture,'kN','Ae/Ag ingresada; no sustituye verificación de la unión.'),
+ check('Compresión','E.3 / E.4',Nc,cap.compression,'kN','Longitudes y factores K ingresados. Secciones esbeltas fuera de alcance.'),
+ check('Flexión eje fuerte','F.2',M,cap.bending,'kN·m','Sólo sección compacta. Cb=1. Carga al centro de corte o ala superior. Apoyos con restricción torsional supuesta.'),
+ check('Corte alma','G.2.1',V,cap.shear,'kN','Sin rigidizadores; kv=5; h/tw ≤ 260.')];
+ let worst=null;
+ if(cap.bending!==null&&cap.compression!==null){
+  const interaction=P=>P>=0.2?P+8/9*M/cap.bending:P/2+M/cap.bending;
+  worst=Math.max(interaction(Nc/cap.compression),interaction(Nt/cap.tension));
+ }
+ checks.push(check('Esbeltez en compresión','E.2',Nc>1e-8?Math.max(cap.trace.lambdaX,cap.trace.lambdaY):0,200,'','Límite para acciones estáticas y viento. Excepciones no aplicadas.'));
+ checks.push(check('Interacción N–M','H.1',worst??0,worst===null?null:1,'','Envolvente conservadora de N y M dentro del mismo caso, con esfuerzos de primer orden; Capítulo C pendiente.'));
+ return {checks,capacities:cap,demands:{Nc,Nt,M,V},status:checks.some(c=>c.status==='NO_SATISFACE')?'NO_SATISFACE':checks.some(c=>c.status==='NO_VERIFICADO')?'NO_VERIFICADO':'CHEQUEOS_PARCIALES_SATISFECHOS'};
+}
