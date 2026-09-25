@@ -1,0 +1,19 @@
+import {CATALOG_EN} from './catalog.js';
+import {range} from '../core/math.js';
+export const catalog=CATALOG_EN;
+export function section(key,overrides={}){
+ const p=catalog[key];if(!p||p.family!=='I')throw Error(`Perfil fuera de alcance: ${key}. Sólo doble Te de doble simetría.`);
+ const {h:d,b,tw,tf}=p.dims, h=d-2*tf, h0=d-tf;
+ // Idealización rectangular: sin radios. No se presenta como tabla certificada.
+ const A=2*b*tf+h*tw, Ix=(b*d**3-(b-tw)*h**3)/12;
+ const Iy=(2*tf*b**3+h*tw**3)/12, Zx=b*tf*(d-tf)+tw*h*h/4;
+ const s={key,d,b,tw,tf,h,h0,A,Ix,Iy,Sx:Ix/(d/2),Zx,J:(2*b*tf**3+h*tw**3)/3,Cw:tf*b**3*h0**2/24,
+  source:'Geometría del catálogo original; propiedades aproximadas sin radios',verified:false,manufacturing:'rolled'};
+ if(overrides[key]){
+  const o=overrides[key];for(const k of ['A','Ix','Iy','Sx','Zx','J','Cw'])s[k]=range(o[k],1e-14,1,`${key}.${k}`);
+  if(typeof o.source!=='string'||!o.source.trim())throw Error('La tabla de propiedades necesita una fuente.');
+  s.source=o.source;s.verified=o.verified===true;
+ }
+ s.rx=Math.sqrt(s.Ix/s.A);s.ry=Math.sqrt(s.Iy/s.A);s.mass=s.A*7850;
+ return s;
+}
