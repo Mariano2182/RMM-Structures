@@ -1,0 +1,6 @@
+import {validateProject} from '../model/project.js';
+const KEY='rmm-structures-engineering-v1';
+export function listVersions(){try{const a=JSON.parse(localStorage.getItem(KEY)||'[]');if(!Array.isArray(a))throw Error();return a;}catch{throw Error('No se pudo leer el historial local. Exporte su trabajo antes de limpiar el almacenamiento.');}}
+export function saveVersion(project){validateProject(project);const a=listVersions(),entry={id:crypto.randomUUID(),savedAt:new Date().toISOString(),project:structuredClone(project)};a.unshift(entry);try{localStorage.setItem(KEY,JSON.stringify(a.slice(0,50)));}catch{throw Error('No se pudo guardar: almacenamiento lleno o bloqueado. Descargue el JSON.');}return entry;}
+export function loadVersion(id){const v=listVersions().find(x=>x.id===id);if(!v)throw Error('Versión no encontrada.');return structuredClone(validateProject(v.project));}
+export function importProject(text){if(text.length>2e6)throw Error('JSON demasiado grande (máximo 2 MB).');let p;try{p=JSON.parse(text);}catch{throw Error('JSON inválido.');}return validateProject(p);}
