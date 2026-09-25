@@ -1,0 +1,66 @@
+import {range} from '../core/math.js';
+import {section} from './sections.js';
+export const ENGINE_VERSION='0.1.0';
+export function newProject(){return {
+ schemaVersion:1,id:globalThis.crypto?.randomUUID?.()||`project-${Date.now()}`,name:'Nave de ejemplo',location:'Córdoba — ubicación por confirmar',revision:1,
+ geometry:{span:18,length:30,height:6,frames:6,roof:'gable',slope:0.10,purlinSpacing:1.5,girtSpacing:1.5},
+ profiles:{column:'HEB300',rafter:'IPE330',secondary:'IPE120'},sectionOverrides:{},
+ material:{name:'Acero de ejemplo — confirmar certificado',E:200000,Fy:250,Fu:400,nu:0.3},
+ analysis:{support:'fixed',subdivisions:6,Kx:1,Ky:1,Kz:1,Ly:6,Lz:6,Lb:1.5,loadPosition:'top',effectiveAreaRatio:0.85},
+ loads:{dead:0.25,roofLive:0.60,windX:0.40,windRoof:0.35,source:'Valores ilustrativos. Reemplazar por acciones justificadas.',edition:'Acciones manuales; edición y aplicabilidad por confirmar'},
+ combinations:[
+  {id:'U1',name:'1.4 D',kind:'ULS',D:1.4,Lr:0,W:0,reference:'CIRSOC 301-2018 B.2.1; F=0'},
+  {id:'U2',name:'1.2 D + 1.6 Lr',kind:'ULS',D:1.2,Lr:1.6,W:0,reference:'B.2.3; otras acciones omitidas'},
+  {id:'U3',name:'1.2 D + 1.6 Lr + 0.8 W',kind:'ULS',D:1.2,Lr:1.6,W:0.8,reference:'B.2.3; subconjunto D/Lr/W'},
+  {id:'U4',name:'1.2 D + 1.5 W + 0.5 Lr',kind:'ULS',D:1.2,Lr:0.5,W:1.5,reference:'B.2.4; f1=0.5, confirmar aplicabilidad'},
+  {id:'U5',name:'0.9 D + 1.5 W',kind:'ULS',D:0.9,Lr:0,W:1.5,reference:'B.2.6; otras acciones omitidas'},
+  {id:'S1',name:'D + Lr',kind:'SLS',D:1,Lr:1,W:0,reference:'Combinación de servicio de ejemplo, confirmar'},
+  {id:'S2',name:'D + W',kind:'SLS',D:1,Lr:0,W:1,reference:'Combinación de servicio de ejemplo, confirmar'}],
+ service:{roofLimit:240,driftLimit:300},normative:{steel:'CIRSOC 301-2018',jurisdictionConfirmed:false},notes:''};}
+export function validateProject(p){
+ if(!p||p.schemaVersion!==1)throw Error('Formato no soportado. Se requiere schemaVersion=1.');
+ for(const k of ['id','name','location'])if(typeof p[k]!=='string'||p[k].length>500)throw Error(`Campo ${k} inválido.`);
+ const g=p.geometry,a=p.analysis,m=p.material,l=p.loads;
+ if(!g||!a||!m||!l||!p.profiles||!p.normative||!p.service)throw Error('Proyecto incompleto.');
+ range(g.span,2,60,'Luz');range(g.length,2,150,'Largo');range(g.height,2,20,'Altura');range(g.frames,2,30,'Pórticos');
+ if(!Number.isInteger(g.frames))throw Error('La cantidad de pórticos debe ser entera.');
+ if(!['gable','mono','flat'].includes(g.roof))throw Error('Cubierta no soportada.');
+ range(g.slope,0,0.5,'Pendiente');range(g.purlinSpacing,0.3,4,'Separación de correas');range(g.girtSpacing,0.3,4,'Separación de largueros');
+ range(m.E,100000,250000,'E (MPa)');range(m.Fy,150,460,'Fy (MPa)');range(m.Fu,m.Fy,800,'Fu (MPa)');range(m.nu,0.1,0.4,'Poisson');
+ if(!['fixed','pinned'].includes(a.support))throw Error('Apoyo no soportado.');
+ range(a.subdivisions,2,12,'Subdivisiones');if(!Number.isInteger(a.subdivisions))throw Error('Subdivisiones debe ser entero.');
+ for(const k of ['Kx','Ky','Kz'])range(a[k],0.5,5,k);
+ for(const k of ['Ly','Lz','Lb'])range(a[k],0.05,60,k);
+ range(a.effectiveAreaRatio,0.01,1,'Ae/Ag');if(!['top','shearCenter'].includes(a.loadPosition))throw Error('Posición de carga no soportada.');
+ for(const k of ['dead','roofLive'])range(l[k],0,20,k);for(const k of ['windX','windRoof'])range(l[k],-20,20,k);
+ if(typeof l.source!=='string'||typeof l.edition!=='string')throw Error('Faltan origen y edición de las acciones.');
+ range(p.service.roofLimit,50,2000,'Límite flecha');range(p.service.driftLimit,50,2000,'Límite deriva');
+ if(!Array.isArray(p.combinations)||!p.combinations.length||p.combinations.length>40)throw Error('Se requieren entre 1 y 40 combinaciones.');
+ const ids=new Set();for(const c of p.combinations){if(!c.id||ids.has(c.id)||!['ULS','SLS'].includes(c.kind))throw Error('Identificador o tipo de combinación inválido.');ids.add(c.id);for(const k of ['D','Lr','W'])range(c[k],-3,3,`Factor ${k}`);if(![c.D,c.Lr,c.W].some(v=>v!==0))throw Error('Combinación sin acciones.');}
+ if(!p.combinations.some(c=>c.kind==='ULS')||!p.combinations.some(c=>c.kind==='SLS'))throw Error('Se requiere al menos una combinación ULS y una SLS.');
+ if(p.normative.steel!=='CIRSOC 301-2018')throw Error('La edición de acero implementada es CIRSOC 301-2018.');
+ for(const k of ['column','rafter','secondary'])section(p.profiles[k],p.sectionOverrides);
+ return p;
+}
+export function buildModel(project){
+ const p=validateProject(project),g=p.geometry,step=g.length/(g.frames-1),parts=[];
+ const sections=Object.fromEntries(Object.entries(p.profiles).map(([k,v])=>[k,section(v,p.sectionOverrides)]));
+ const roofY=x=>g.height+(g.roof==='flat'?0:g.roof==='mono'?x*g.slope:(g.span/2-Math.abs(x-g.span/2))*g.slope);
+ const add=(id,type,a,b,frame=null)=>{const s=sections[type==='column'?'column':type==='rafter'?'rafter':'secondary'];const length=Math.hypot(...a.map((v,i)=>b[i]-v));parts.push({id,type,a,b,frame,profile:s.key,length,massKg:length*s.mass,section:s});};
+ for(let i=0;i<g.frames;i++){
+  const z=i*step;add(`C-L-${i+1}`,'column',[0,0,z],[0,roofY(0),z],i);add(`C-R-${i+1}`,'column',[g.span,0,z],[g.span,roofY(g.span),z],i);
+  if(g.roof==='gable'){add(`R-L-${i+1}`,'rafter',[0,roofY(0),z],[g.span/2,roofY(g.span/2),z],i);add(`R-R-${i+1}`,'rafter',[g.span/2,roofY(g.span/2),z],[g.span,roofY(g.span),z],i);}
+  else add(`R-${i+1}`,'rafter',[0,roofY(0),z],[g.span,roofY(g.span),z],i);
+ }
+ // Positions derive from maximum spacing measured on the slope. Ridge occurs once.
+ const slopeFactor=Math.sqrt(1+(g.roof==='flat'?0:g.slope)**2),panels=g.roof==='gable'?2:1;
+ const n=Math.ceil((g.span/panels)*slopeFactor/g.purlinSpacing),xs=Array.from({length:panels*n+1},(_,i)=>g.span*i/(panels*n));
+ for(let bay=0;bay<g.frames-1;bay++){
+  xs.forEach((x,k)=>add(`P-${bay+1}-${k+1}`,'purlin',[x,roofY(x),bay*step],[x,roofY(x),(bay+1)*step]));
+  for(const [side,x] of [['L',0],['R',g.span]]){
+   const top=roofY(x)-0.3,bottom=Math.min(1.2,top/2),count=Math.max(1,Math.ceil((top-bottom)/g.girtSpacing));
+   for(let k=0;k<=count;k++){const y=bottom+(top-bottom)*k/count;add(`G-${side}-${bay+1}-${k+1}`,'girt',[x,y,bay*step],[x,y,(bay+1)*step]);}
+  }
+ }
+ return {parts,step,sections,roofArea:g.span*g.length*slopeFactor,planArea:g.span*g.length,massKg:parts.reduce((s,x)=>s+x.massKg,0)};
+}
