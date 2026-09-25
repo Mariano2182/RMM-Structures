@@ -1,0 +1,38 @@
+// IFC4: physical members from the exact same list used by BOM and spatial view.
+// Coordinates transformed right-handed: application (X,Y-up,Z) -> IFC (X,-Z,Y-up).
+const alphabet='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$';
+function guid(){const a=crypto.getRandomValues(new Uint8Array(16));let n=0n;for(const b of a)n=(n<<8n)|BigInt(b);let s='';for(let i=0;i<22;i++){s=alphabet[Number(n&63n)]+s;n>>=6n;}return s;}
+const str=s=>"'"+String(s).replace(/[^\x20-\x7e]/g,'?').replaceAll("'","''")+"'";
+const num=x=>{if(!Number.isFinite(x))throw Error('Coordenada IFC no finita');return Number.isInteger(x)?`${x}.`:String(x);};
+const vec=v=>'('+v.map(num).join(',')+')';
+const norm=v=>{const l=Math.hypot(...v);return v.map(x=>x/l);};
+const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+export function exportIFC(model,name){
+ const lines=[];const add=(type,args)=>{lines.push(`#${lines.length+1}=${type}(${args});`);return `#${lines.length}`;};
+ const pt=v=>add('IFCCARTESIANPOINT',vec(v)),dir=v=>add('IFCDIRECTION',vec(v));
+ const origin=pt([0,0,0]),axes=add('IFCAXIS2PLACEMENT3D',`${origin},$,$`),ctx=add('IFCGEOMETRICREPRESENTATIONCONTEXT',`$,'Model',3,0.00001,${axes},$`);
+ const unit=add('IFCSIUNIT','*,.LENGTHUNIT.,$,.METRE.'),units=add('IFCUNITASSIGNMENT',`(${unit})`);
+ const project=add('IFCPROJECT',`${str(guid())},$,${str(name)},$,$,$,$,(${ctx}),${units}`);
+ const placement=add('IFCLOCALPLACEMENT',`$,${axes}`);
+ const site=add('IFCSITE',`${str(guid())},$,'Site',$,$,${placement},$,$,.ELEMENT.,$,$,$,$,$`);
+ const building=add('IFCBUILDING',`${str(guid())},$,'Nave',$,$,${placement},$,$,.ELEMENT.,$,$,$`);
+ const floor=add('IFCBUILDINGSTOREY',`${str(guid())},$,'Nivel 0',$,$,${placement},$,$,.ELEMENT.,0.`);
+ for(const [parent,child] of [[project,site],[site,building],[building,floor]])add('IFCRELAGGREGATES',`${str(guid())},$,$,$,${parent},(${child})`);
+ const profileCache=new Map(),products=[];
+ for(const p of model.parts){
+  let profile=profileCache.get(p.profile);
+  if(!profile){const s=p.section,x=s.b/2,y=s.d/2,w=s.tw/2,t=s.tf;
+   const poly=[[-x,-y],[x,-y],[x,-y+t],[w,-y+t],[w,y-t],[x,y-t],[x,y],[-x,y],[-x,y-t],[-w,y-t],[-w,-y+t],[-x,-y+t],[-x,-y]];
+   const curve=add('IFCPOLYLINE',`(${poly.map(pt).join(',')})`);profile=add('IFCARBITRARYCLOSEDPROFILEDEF',`.AREA.,${str(p.profile+' idealizado')},${curve}`);profileCache.set(p.profile,profile);
+  }
+  const convert=v=>[v[0],-v[2],v[1]],a=convert(p.a),b=convert(p.b),z=norm(b.map((x,i)=>x-a[i]));
+  const pref=Math.abs(z[2])>0.9?[1,0,0]:[0,0,1],x=norm(cross(pref,z));
+  const axis=add('IFCAXIS2PLACEMENT3D',`${pt(a)},${dir(z)},${dir(x)}`),local=add('IFCLOCALPLACEMENT',`${placement},${axis}`);
+  const solid=add('IFCEXTRUDEDAREASOLID',`${profile},${axes},${dir([0,0,1])},${num(p.length)}`);
+  const rep=add('IFCSHAPEREPRESENTATION',`${ctx},'Body','SweptSolid',(${solid})`),shape=add('IFCPRODUCTDEFINITIONSHAPE',`$,$,(${rep})`);
+  const type=p.type==='column'?'IFCCOLUMN':p.type==='rafter'?'IFCBEAM':'IFCMEMBER';
+  products.push(add(type,`${str(guid())},$,${str(p.id)},'Geometria idealizada; sin aprobacion estructural',$,${local},${shape},${str(p.id)},.NOTDEFINED.`));
+ }
+ add('IFCRELCONTAINEDINSPATIALSTRUCTURE',`${str(guid())},$,$,$,(${products.join(',')}),${floor}`);
+ return `ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('Geometria de barras; revision profesional pendiente'),'2;1');\nFILE_NAME('rmm.ifc',${str(new Date().toISOString())},('RMM'),('RMM'),'RMM Structures 0.1','RMM','');\nFILE_SCHEMA(('IFC4'));\nENDSEC;\nDATA;\n${lines.join('\n')}\nENDSEC;\nEND-ISO-10303-21;`;
+}
