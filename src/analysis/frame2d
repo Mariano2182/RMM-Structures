@@ -1,0 +1,42 @@
+import {zeros,transpose,mm,mv,solveSPD,finite} from '../core/math.js';
+export function elementMatrices(a,b,E,A,I){
+ const dx=b.x-a.x,dy=b.y-a.y,L=Math.hypot(dx,dy);if(L<1e-8)throw Error('Barra de longitud nula.');
+ for(const [k,v] of Object.entries({E,A,I}))if(!(finite(v,k)>0))throw Error(`${k} debe ser positivo.`);
+ const c=dx/L,s=dy/L,u=E*A/L,v=12*E*I/L**3,w=6*E*I/L**2,t=4*E*I/L,r=2*E*I/L;
+ const k=[[u,0,0,-u,0,0],[0,v,w,0,-v,w],[0,w,t,0,-w,r],[-u,0,0,u,0,0],[0,-v,-w,0,v,-w],[0,w,r,0,-w,t]];
+ const T=[[c,s,0,0,0,0],[-s,c,0,0,0,0],[0,0,1,0,0,0],[0,0,0,c,s,0],[0,0,0,-s,c,0],[0,0,0,0,0,1]];
+ return {L,c,s,k,T,kg:mm(transpose(T),mm(k,T))};
+}
+export function analyzeFrame(model){
+ const {nodes,elements}=model;if(nodes.length>500||!nodes.length||!elements.length)throw Error('Tamaño de modelo no permitido.');
+ const n=nodes.length*3,K=zeros(n),F=Array(n).fill(0),cache=[];
+ nodes.forEach((v,i)=>{finite(v.x,'x');finite(v.y,'y');if(!Array.isArray(v.fix)||v.fix.length!==3)throw Error('Restricciones inválidas.');(v.load||[0,0,0]).forEach((x,j)=>F[3*i+j]=finite(x,'Carga nodal'));});
+ for(const e of elements){
+  if(!nodes[e.i]||!nodes[e.j])throw Error('Conectividad inválida.');
+  const em=elementMatrices(nodes[e.i],nodes[e.j],e.E,e.A,e.I),{L,c,s,k,T,kg}=em;
+  const qX=finite(e.qX||0,'qX'),qY=finite(e.qY||0,'qY'),qx=c*qX+s*qY,qy=-s*qX+c*qY;
+  const fl=[qx*L/2,qy*L/2,qy*L*L/12,qx*L/2,qy*L/2,-qy*L*L/12],fg=mv(transpose(T),fl);
+  const dofs=[3*e.i,3*e.i+1,3*e.i+2,3*e.j,3*e.j+1,3*e.j+2];
+  dofs.forEach((di,i)=>{F[di]+=fg[i];dofs.forEach((dj,j)=>K[di][dj]+=kg[i][j]);});
+  cache.push({...em,e,dofs,fl,qx,qy});
+ }
+ const free=Array.from({length:n},(_,i)=>i).filter(i=>!nodes[Math.floor(i/3)].fix[i%3]);
+ const uf=solveSPD(free.map(i=>free.map(j=>K[i][j])),free.map(i=>F[i])),u=Array(n).fill(0);free.forEach((d,i)=>u[d]=uf[i]);
+ const Ku=mv(K,u),residual=Ku.map((v,i)=>v-F[i]);
+ const freeResidual=Math.max(0,...free.map(i=>Math.abs(residual[i]))),scale=Math.max(1,...F.map(Math.abs));
+ if(freeResidual/scale>1e-7)throw Error('El residuo de equilibrio supera la tolerancia.');
+ const results=cache.map(z=>{
+  const {e,dofs,k,T,fl,L,qx,qy,c,s}=z,d=mv(T,dofs.map(i=>u[i])),f=mv(k,d).map((v,i)=>v-fl[i]);
+  const xs=new Set(Array.from({length:21},(_,i)=>L*i/20));if(Math.abs(qy)>1e-12){const x=-f[1]/qy;if(x>0&&x<L)xs.add(x);}
+  const samples=[...xs].sort((a,b)=>a-b).map(x=>{
+   const t=x/L,ul=(1-t)*d[0]+t*d[3]+qx*x*(L-x)/(2*e.E*e.A);
+   const vl=(1-3*t*t+2*t**3)*d[1]+L*(t-2*t*t+t**3)*d[2]+(3*t*t-2*t**3)*d[4]+L*(-t*t+t**3)*d[5]+qy*x*x*(x-L)**2/(24*e.E*e.I);
+   return {x,N:-f[0]-qx*x,V:f[1]+qy*x,M:-f[2]+f[1]*x+qy*x*x/2,ux:c*ul-s*vl,uy:s*ul+c*vl};
+  });
+  return {id:e.id,parent:e.parent,L,endForces:f,samples};
+ });
+ const reactions=nodes.map((v,i)=>({id:v.id,x:v.x,y:v.y,Rx:v.fix[0]?residual[3*i]:0,Ry:v.fix[1]?residual[3*i+1]:0,M:v.fix[2]?residual[3*i+2]:0})).filter((_,i)=>nodes[i].fix.some(Boolean));
+ const resultant=nodes.reduce((r,v,i)=>[r[0]+F[3*i],r[1]+F[3*i+1],r[2]+F[3*i+2]+v.x*F[3*i+1]-v.y*F[3*i]],[0,0,0]);
+ const balance=reactions.reduce((r,v)=>[r[0]+v.Rx,r[1]+v.Ry,r[2]+v.M+v.x*v.Ry-v.y*v.Rx],resultant);
+ return {displacements:nodes.map((v,i)=>({id:v.id,ux:u[3*i],uy:u[3*i+1],rz:u[3*i+2]})),reactions,elements:results,freeResidual,balance,energy:0.5*u.reduce((s,v,i)=>s+v*Ku[i],0)};
+}
