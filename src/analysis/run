@@ -1,0 +1,47 @@
+import {buildModel,ENGINE_VERSION} from '../model/project.js';
+import {assembleFrame} from './assemble.js';
+import {analyzeFrame} from './frame2d.js';
+import {checkMember} from '../codes/cirsoc301.js';
+export function analyzeProject(p,onProgress=()=>{}){
+ const model=buildModel(p),cases=[],members=new Map(),service=[];
+ const total=p.geometry.frames*p.combinations.reduce((s,c)=>s+(c.W?2:1),0);let done=0;
+ for(let frame=0;frame<p.geometry.frames;frame++)for(const combo of p.combinations)for(const sign of combo.W?[1,-1]:[1]){
+  const mesh=assembleFrame(p,model,frame,combo,sign),solution=analyzeFrame(mesh),id=`P${frame+1}/${combo.id}${combo.W?(sign>0?'/W+':'/W-'):''}`;
+  cases.push({id,frame,combination:combo,windDirection:sign,width:mesh.width,mesh,solution});
+  if(combo.kind==='ULS')for(const part of mesh.primary){
+   const samples=solution.elements.filter(e=>e.parent===part.id).flatMap(e=>e.samples);
+   const checked=checkMember(part.section,p.material,p.analysis,part.length,samples);
+   if(!members.has(part.id))members.set(part.id,{id:part.id,type:part.type,profile:part.profile,length:part.length,checks:[],capacities:checked.capacities});
+   const target=members.get(part.id);
+   checked.checks.forEach((c,i)=>{const old=target.checks[i];if(!old||c.ratio===null||(old.ratio!==null&&c.ratio>old.ratio))target.checks[i]={...c,caseId:id};});
+  }
+  if(combo.kind==='SLS'){
+   let roof=0,drift=0;
+   for(const part of mesh.primary){
+    const group=mesh.elements.filter(e=>e.parent===part.id),first=solution.displacements[group[0].i],last=solution.displacements[group.at(-1).j];
+    if(part.type==='column')drift=Math.max(drift,Math.abs(last.ux-first.ux)/part.length);
+    else {
+     let dist=0;
+     for(const e of group){const r=solution.elements.find(v=>v.id===e.id);for(const s of r.samples){const t=(dist+s.x)/part.length,relative=Math.abs(s.uy-((1-t)*first.uy+t*last.uy));roof=Math.max(roof,relative/part.length);}dist+=r.L;}
+    }
+   }
+   const maxUy=Math.max(...solution.displacements.map(x=>Math.abs(x.uy)));
+   service.push({caseId:id,roofRatio:roof*p.service.roofLimit,driftRatio:drift*p.service.driftLimit,maxUy,detail:'Flecha vertical relativa a la cuerda de cada cabio; deriva de columnas. Límites definidos por usuario, sin atribución normativa automática.'});
+  }
+  onProgress(++done/total);
+ }
+ const memberResults=[...members.values()];
+ const failures=memberResults.flatMap(x=>x.checks).filter(c=>c.status==='NO_SATISFACE').length+service.filter(s=>s.roofRatio>1||s.driftRatio>1).length;
+ return {engineVersion:ENGINE_VERSION,createdAt:new Date().toISOString(),project:structuredClone(p),model,cases,members:memberResults,service,
+  status:'VERIFICACION_GLOBAL_INCOMPLETA',approvedForConstruction:false,failures,
+  pending:[
+   'Capítulo C: segundo orden, imperfecciones y estabilidad global no implementados. Demandas de primer orden.',
+   'Acciones ingresadas manualmente. Generación automática CIRSOC 101/102, sismo, nieve, lluvia y temperatura pendientes.',
+   'Combinaciones de ejemplo: no representan una envolvente normativa completa. Confirmar edición, factores y acciones omitidas.',
+   'Modelo de pórticos planos independientes: arriostramiento longitudinal, diafragmas, torsión y comportamiento 3D no calculados.',
+   'Correas y largueros sólo computados y transferidos como peso propio; su resistencia y sus uniones no verificadas.',
+   'Uniones, anclajes, soldaduras, fundaciones, suelo y etapas de montaje no verificados.',
+   'Propiedades de perfiles idealizadas sin radios salvo sustitución explícita por tabla documentada.',
+   'Revisión independiente, edición aplicable y firma profesional pendientes. No se emite aptitud para construir.'
+  ]};
+}
