@@ -1,0 +1,17 @@
+export function assembleFrame(p,model,frameIndex,combination,windDirection=1){
+ const g=p.geometry,primary=model.parts.filter(x=>x.frame===frameIndex),nodes=[],elements=[],nodeMap=new Map();
+ const width=model.step*(frameIndex===0||frameIndex===g.frames-1?0.5:1),E=p.material.E*1000;
+ const adjacent=part=>Math.abs(part.a[2]-frameIndex*model.step)<1e-7||Math.abs(part.b[2]-frameIndex*model.step)<1e-7;
+ const roofWeight=model.parts.filter(x=>x.type==='purlin'&&adjacent(x)).reduce((s,x)=>s+x.massKg*0.00980665/2,0);
+ const wallWeight=x=>model.parts.filter(v=>v.type==='girt'&&Math.abs(v.a[0]-x)<1e-7&&adjacent(v)).reduce((s,v)=>s+v.massKg*0.00980665/2,0);
+ const node=(x,y)=>{const key=`${x.toFixed(8)}:${y.toFixed(8)}`;if(nodeMap.has(key))return nodeMap.get(key);const index=nodes.length;nodes.push({id:`n${index}`,x,y,fix:y===0?[true,true,p.analysis.support==='fixed']:[false,false,false]});nodeMap.set(key,index);return index;};
+ for(const part of primary){
+  const dx=part.b[0]-part.a[0],dy=part.b[1]-part.a[1],cos=Math.abs(dx)/part.length,s=part.section;
+  let qY=-combination.D*s.mass*0.00980665,qX=0;
+  if(part.type==='rafter')qY+=cos*(-combination.D*(p.loads.dead*width+roofWeight/g.span)-combination.Lr*p.loads.roofLive*width+combination.W*p.loads.windRoof*width);
+  else {qY-=combination.D*wallWeight(part.a[0])/part.length;if(part.a[0]===0)qX=combination.W*p.loads.windX*width*windDirection;}
+  const count=p.analysis.subdivisions;
+  for(let i=0;i<count;i++)elements.push({id:`${part.id}/${i}`,parent:part.id,i:node(part.a[0]+dx*i/count,part.a[1]+dy*i/count),j:node(part.a[0]+dx*(i+1)/count,part.a[1]+dy*(i+1)/count),E,A:s.A,I:s.Ix,qX,qY});
+ }
+ return {nodes,elements,width,primary,frameIndex};
+}
