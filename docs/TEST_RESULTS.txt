@@ -1,0 +1,35 @@
+✔ E.3: ramas inelástica y elástica, valores independientes (0.931438ms)
+✔ E.1: factor CIRSOC 0.85, no 0.90 (0.686647ms)
+✔ D.2: factores de fluencia y rotura (0.139327ms)
+✔ G.1: factor de corte 0.90 (0.124314ms)
+✔ F.2: reducción con Lb y tope plástico (0.435414ms)
+✔ F.2: continuidad en Lp y Lr (0.190752ms)
+✔ Sección esbelta: fuera de alcance, no aprobación (0.424829ms)
+✔ H.1: demanda excedida se informa como no satisfecha (0.158685ms)
+✔ Modelo mono: barras únicas; cantidad CSV e IFC (13.065242ms)
+✔ Modelo gable: barras únicas; cantidad CSV e IFC (4.155582ms)
+✔ Modelo flat: barras únicas; cantidad CSV e IFC (2.771283ms)
+✔ Peso propio: reacción vertical total igual al peso de barras (16.767251ms)
+✔ Cubierta: tributación exacta extremos e interiores (6.40348ms)
+✔ Rechaza datos, perfiles y edición inválidos (0.606588ms)
+✔ JSON y recuperación exacta de versión específica (1.524577ms)
+✔ Almacenamiento dañado informa error (0.504437ms)
+✔ Resultado parcial y HTML con datos escapados (58.776409ms)
+✔ Viga simplemente apoyada: reacciones, qL²/8 y 5qL⁴/384EI (2.788207ms)
+✔ Voladizo puntual: PL³/3EI y PL²/2EI (0.56773ms)
+✔ Voladizo repartido: qL⁴/8EI (0.624965ms)
+✔ Biempotrada: momentos y flecha interior exacta (0.410678ms)
+✔ Barra axial: PL/EA y tracción positiva (1.174449ms)
+✔ Columna vertical: transformación de flexión transversal (0.461433ms)
+✔ Barra inclinada: invariancia de carga axial (0.459891ms)
+✔ Modelo libre: rechaza mecanismo (0.548532ms)
+✔ Longitud cero rechazada (0.411119ms)
+✔ Superposición: duplicar cargas duplica desplazamientos (0.61436ms)
+ℹ tests 27
+ℹ suites 0
+ℹ pass 27
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 202.764312
