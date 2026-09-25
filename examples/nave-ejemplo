@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "id": "rmm-example-001",
+  "name": "Nave de ejemplo",
+  "location": "Córdoba — ubicación por confirmar",
+  "revision": 1,
+  "geometry": {
+    "span": 18,
+    "length": 30,
+    "height": 6,
+    "frames": 6,
+    "roof": "gable",
+    "slope": 0.1,
+    "purlinSpacing": 1.5,
+    "girtSpacing": 1.5
+  },
+  "profiles": {
+    "column": "HEB300",
+    "rafter": "IPE330",
+    "secondary": "IPE120"
+  },
+  "sectionOverrides": {},
+  "material": {
+    "name": "Acero de ejemplo — confirmar certificado",
+    "E": 200000,
+    "Fy": 250,
+    "Fu": 400,
+    "nu": 0.3
+  },
+  "analysis": {
+    "support": "fixed",
+    "subdivisions": 6,
+    "Kx": 1,
+    "Ky": 1,
+    "Kz": 1,
+    "Ly": 6,
+    "Lz": 6,
+    "Lb": 1.5,
+    "loadPosition": "top",
+    "effectiveAreaRatio": 0.85
+  },
+  "loads": {
+    "dead": 0.25,
+    "roofLive": 0.6,
+    "windX": 0.4,
+    "windRoof": 0.35,
+    "source": "Valores ilustrativos. Reemplazar por acciones justificadas.",
+    "edition": "Acciones manuales; edición y aplicabilidad por confirmar"
+  },
+  "combinations": [
+    {
+      "id": "U1",
+      "name": "1.4 D",
+      "kind": "ULS",
+      "D": 1.4,
+      "Lr": 0,
+      "W": 0,
+      "reference": "CIRSOC 301-2018 B.2.1; F=0"
+    },
+    {
+      "id": "U2",
+      "name": "1.2 D + 1.6 Lr",
+      "kind": "ULS",
+      "D": 1.2,
+      "Lr": 1.6,
+      "W": 0,
+      "reference": "B.2.3; otras acciones omitidas"
+    },
+    {
+      "id": "U3",
+      "name": "1.2 D + 1.6 Lr + 0.8 W",
+      "kind": "ULS",
+      "D": 1.2,
+      "Lr": 1.6,
+      "W": 0.8,
+      "reference": "B.2.3; subconjunto D/Lr/W"
+    },
+    {
+      "id": "U4",
+      "name": "1.2 D + 1.5 W + 0.5 Lr",
+      "kind": "ULS",
+      "D": 1.2,
+      "Lr": 0.5,
+      "W": 1.5,
+      "reference": "B.2.4; f1=0.5, confirmar aplicabilidad"
+    },
+    {
+      "id": "U5",
+      "name": "0.9 D + 1.5 W",
+      "kind": "ULS",
+      "D": 0.9,
+      "Lr": 0,
+      "W": 1.5,
+      "reference": "B.2.6; otras acciones omitidas"
+    },
+    {
+      "id": "S1",
+      "name": "D + Lr",
+      "kind": "SLS",
+      "D": 1,
+      "Lr": 1,
+      "W": 0,
+      "reference": "Combinación de servicio de ejemplo, confirmar"
+    },
+    {
+      "id": "S2",
+      "name": "D + W",
+      "kind": "SLS",
+      "D": 1,
+      "Lr": 0,
+      "W": 1,
+      "reference": "Combinación de servicio de ejemplo, confirmar"
+    }
+  ],
+  "service": {
+    "roofLimit": 240,
+    "driftLimit": 300
+  },
+  "normative": {
+    "steel": "CIRSOC 301-2018",
+    "jurisdictionConfirmed": false
+  },
+  "notes": ""
+}
